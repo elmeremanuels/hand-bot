@@ -191,6 +191,50 @@ class PolymarketClient:
             # Extract asset from question
             asset = self._extract_asset(question)
 
+            # Extract target price and current price if available
+            # Polymarket provides these directly in the API response
+            target_price = None
+            current_price = None
+
+            # Try to get from direct fields
+            for field in ["price_to_beat", "target_price", "strike_price", "strike"]:
+                if field in market and market[field]:
+                    try:
+                        target_price = float(market[field])
+                        break
+                    except (ValueError, TypeError):
+                        pass
+
+            # Try to get current price
+            for field in ["current_price", "underlying_price", "spot_price"]:
+                if field in market and market[field]:
+                    try:
+                        current_price = float(market[field])
+                        break
+                    except (ValueError, TypeError):
+                        pass
+
+            # Also check metadata/custom_properties
+            metadata = market.get("metadata", {}) or market.get("custom_properties", {})
+            if isinstance(metadata, dict):
+                if not target_price:
+                    for field in ["price_to_beat", "target_price", "strike_price", "strike"]:
+                        if field in metadata:
+                            try:
+                                target_price = float(metadata[field])
+                                break
+                            except (ValueError, TypeError):
+                                pass
+
+                if not current_price:
+                    for field in ["current_price", "underlying_price", "spot_price"]:
+                        if field in metadata:
+                            try:
+                                current_price = float(metadata[field])
+                                break
+                            except (ValueError, TypeError):
+                                pass
+
             return {
                 "market_id": market_id,
                 "question": question,
@@ -201,6 +245,8 @@ class PolymarketClient:
                 "asset": asset,
                 "volume_24h": float(market.get("volume_24hr", 0)),
                 "liquidity": float(market.get("liquidity", 0)),
+                "target_price": target_price,  # Target price from API
+                "current_price": current_price,  # Current price from API
             }
 
         except Exception as e:

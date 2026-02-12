@@ -141,8 +141,17 @@ class MarketScanner:
 
             # Get current crypto price and target
             asset = market["asset"]
-            current_price = await self._get_crypto_price(asset)
-            target_price = self._extract_target_price(market)
+
+            # Try to use prices from API first (Polymarket provides these directly)
+            target_price = market.get("target_price")
+            current_price = market.get("current_price")
+
+            # Fallback to extraction if not provided by API
+            if target_price is None:
+                target_price = self._extract_target_price(market)
+
+            if current_price is None:
+                current_price = await self._get_crypto_price(asset)
 
             if current_price is None or target_price is None:
                 logger.warning(f"Could not determine prices for {market_id}")
@@ -224,7 +233,10 @@ class MarketScanner:
 
     def _extract_target_price(self, market: Dict) -> Optional[float]:
         """
-        Extract target price from market question or metadata.
+        Extract target price from market data.
+
+        Polymarket provides the target price directly in the API response
+        as "price_to_beat", "strike_price", or in market metadata.
 
         Args:
             market: Market data
@@ -232,33 +244,50 @@ class MarketScanner:
         Returns:
             Target price or None
         """
-        # The target price is typically embedded in the market question
-        # Example: "Will Bitcoin be above $94,950 at 9:05 PM ET?"
-
-        question = market.get("question", "")
-        slug = market.get("slug", "")
-
-        # Try to extract price from question using common patterns
-        import re
-
-        # Pattern: $XX,XXX or $XXXXX
-        price_patterns = [
-            r'\$([0-9,]+(?:\.[0-9]{2})?)',  # $95,000 or $95,000.00
-            r'([0-9,]+(?:\.[0-9]{2})?)\s*(?:USD|usd|dollars?)',  # 95,000 USD
+        # Try direct fields first (from Polymarket API)
+        direct_fields = [
+            "price_to_beat",
+            "target_price",
+            "strike_price",
+            "strike",
         ]
 
-        for pattern in price_patterns:
-            matches = re.findall(pattern, question + " " + slug)
-            if matches:
-                # Take the first match and clean it
-                price_str = matches[0].replace(',', '')
+        for field in direct_fields:
+            if field in market and market[field]:
                 try:
-                    return float(price_str)
-                except ValueError:
+                    return float(market[field])
+                except (ValueError, TypeError):
                     continue
 
+        # Check in metadata/custom_properties
+        metadata = market.get("metadata", {}) or market.get("custom_properties", {})
+        if isinstance(metadata, dict):
+            for field in direct_fields:
+                if field in metadata:
+                    try:
+                        return float(metadata[field])
+                    except (ValueError, TypeError):
+                        continue
+
+        # Fallback: Extract from question text if absolutely necessary
+        # (This is less reliable and should be avoided)
+        question = market.get("question", "")
+
+        import re
+        # Pattern: $XX,XXX.XX or $XXXXX
+        price_pattern = r'\$([0-9,]+(?:\.[0-9]{2})?)'
+        matches = re.findall(price_pattern, question)
+
+        if matches:
+            # Take the first match and clean it
+            price_str = matches[0].replace(',', '')
+            try:
+                return float(price_str)
+            except ValueError:
+                pass
+
         # If we can't extract it, log and return None
-        logger.warning(f"Could not extract target price from: {question}")
+        logger.warning(f"Could not extract target price from market: {market.get('question', 'unknown')}")
         return None
 
     def _cleanup_cache(self):
