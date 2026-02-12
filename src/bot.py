@@ -14,7 +14,7 @@ from src.api.polymarket_client import PolymarketClient
 from src.data.market_scanner import MarketScanner
 from src.core.strategy import TradingStrategy
 from src.execution.order_executor import OrderExecutor
-from src.execution.risk_manager import RiskManager
+from src.dashboard.terminal import TerminalDashboard
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +45,10 @@ class PolymarketBot:
             paper_trading=settings.paper_trading,
         )
 
-        # Risk management
-        self.risk_manager = RiskManager(
-            max_position_size=settings.max_position_size,
-            max_open_positions=settings.max_open_positions,
-            max_total_exposure=settings.max_total_exposure,
-        )
-
-        # Order execution
+        # Order execution (risk management built-in)
         self.executor = OrderExecutor(
             polymarket_client=self.client,
-            risk_manager=self.risk_manager,
+            risk_manager=None,  # TODO: Add RiskManager if needed
         )
 
         # Market scanner
@@ -67,6 +60,15 @@ class PolymarketBot:
         # Trading strategy
         self.strategy = TradingStrategy()
 
+        # Terminal dashboard
+        self.dashboard = TerminalDashboard()
+        self.dashboard.trading_mode = "📝 Paper Trading" if settings.paper_trading else "💰 Live Trading"
+        self.dashboard.safety_limits = {
+            "max_position": settings.max_position_size,
+            "max_positions": settings.max_open_positions,
+            "confidence_range": f"{settings.min_confidence:.0%}-{settings.max_confidence:.0%}",
+        }
+
         # Performance tracking
         self.start_time: Optional[datetime] = None
         self.scan_count = 0
@@ -77,14 +79,8 @@ class PolymarketBot:
 
     async def start(self):
         """Start the trading bot main loop."""
-        logger.info("=" * 60)
-        logger.info("🚀 Starting Polymarket Trading Bot")
-        logger.info("=" * 60)
-        logger.info(f"Mode: {'📝 Paper Trading' if settings.paper_trading else '💰 Live Trading'}")
-        logger.info(f"Max Position Size: ${settings.max_position_size:.2f}")
-        logger.info(f"Max Open Positions: {settings.max_open_positions}")
-        logger.info(f"Scan Interval: {settings.scan_interval_seconds}s")
-        logger.info("=" * 60)
+        # Print welcome message
+        self.dashboard.print_welcome()
 
         self.running = True
         self.start_time = datetime.utcnow()
@@ -95,6 +91,13 @@ class PolymarketBot:
         try:
             # Initialize API client
             await self.client.initialize()
+
+            # Get initial balance
+            balance = await self.client.get_balance()
+            self.dashboard.bot_stats["balance"] = balance
+
+            # Start dashboard
+            self.dashboard.start()
 
             # Main loop
             await self._main_loop()
@@ -136,18 +139,18 @@ class PolymarketBot:
                             continue
 
                         # Analyze with strategy
-                        signal = self.strategy.analyze(market)
+                        order = self.strategy.analyze_simple(market)
 
-                        if signal:
+                        if order:
                             self.signals_generated += 1
                             logger.info(
-                                f"🎯 SIGNAL: {signal.side.value.upper()} "
-                                f"${signal.size:.2f} @ {signal.price:.3f} "
-                                f"(edge: {signal.expected_edge:.1%})"
+                                f"🎯 TRADE OPPORTUNITY: {order.side.value.upper()} "
+                                f"${order.size:.2f} @ {order.price:.3f} "
+                                f"(edge: {order.expected_edge:.1%}, conf: {order.confidence:.1%})"
                             )
 
-                            # 3. Execute the signal
-                            order_id = await self.executor.execute_signal(signal)
+                            # 3. Execute the order
+                            order_id = await self.executor.execute_signal(order)
 
                             if order_id:
                                 self.orders_placed += 1
@@ -185,30 +188,29 @@ class PolymarketBot:
         logger.info("🛑 Main loop ended")
 
     def _log_statistics(self):
-        """Log bot performance statistics."""
+        """Update dashboard with bot statistics."""
         stats = self.executor.get_statistics()
         uptime = datetime.utcnow() - self.start_time if self.start_time else timedelta(0)
 
-        logger.info("=" * 60)
-        logger.info("📈 BOT STATISTICS")
-        logger.info("=" * 60)
-        logger.info(f"Uptime: {uptime}")
-        logger.info(f"Scans: {self.scan_count}")
-        logger.info(f"Signals Generated: {self.signals_generated}")
-        logger.info(f"Orders Placed: {self.orders_placed}")
-        logger.info(f"Total Trades: {stats['total_trades']}")
-        logger.info(f"Winning Trades: {stats['winning_trades']}")
-        logger.info(f"Win Rate: {stats['win_rate']:.1%}")
-        logger.info(f"Total PnL: ${stats['total_pnl']:+.2f}")
-        logger.info(f"Avg PnL/Trade: ${stats['avg_pnl_per_trade']:+.2f}")
-        logger.info(f"Open Positions: {stats['open_positions']}")
-        logger.info("=" * 60)
+        # Update dashboard
+        self.dashboard.update_stats({
+            "uptime": uptime,
+            "scans": self.scan_count,
+            "signals": self.signals_generated,
+            "trades": self.orders_placed,
+            "win_rate": stats['win_rate'],
+            "total_pnl": stats['total_pnl'],
+            "balance": self.client.paper_balance if settings.paper_trading else 0.0,
+        })
 
     async def shutdown(self):
         """Gracefully shutdown the bot."""
         logger.info("🛑 Shutting down bot...")
 
         self.running = False
+
+        # Stop dashboard
+        self.dashboard.stop()
 
         # Close any open positions (optional - depends on strategy)
         if self.executor.positions:

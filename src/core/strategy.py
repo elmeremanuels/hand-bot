@@ -15,6 +15,12 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+class MarketSide(Enum):
+    """Market side (UP or DOWN)."""
+    UP = "up"
+    DOWN = "down"
+
+
 class TradeSignal(Enum):
     """Mogelijke trade signalen."""
     BUY_UP = "buy_up"
@@ -95,6 +101,27 @@ class TradeDecision:
             self.timestamp = datetime.utcnow()
 
 
+@dataclass
+class TradeOrder:
+    """
+    Trade order for execution.
+    Used by OrderExecutor to place orders.
+    """
+
+    market_id: str
+    token_id_up: str
+    token_id_down: str
+    side: MarketSide  # UP or DOWN
+    price: float  # Entry price (0.0 - 1.0)
+    size: float  # Position size in USD
+    expected_edge: float  # Expected profit edge
+    market_end_time: datetime
+
+    # Optional metadata
+    confidence: Optional[float] = None
+    reason: Optional[str] = None
+
+
 class TradingStrategy:
     """
     Implementeert de trading strategie regels.
@@ -124,7 +151,7 @@ class TradingStrategy:
         self.max_confidence = max_confidence or settings.trading.max_confidence
         self.min_time_remaining = min_time_remaining or settings.trading.min_time_remaining_seconds
         self.max_time_remaining = max_time_remaining or settings.trading.max_time_remaining_seconds
-        self.min_spread = min_spread or settings.trading.min_spread_above_target_usd
+        self.min_spread = min_spread or 30.0  # Default $30 spread
         self.profit_lock_enabled = profit_lock_enabled if profit_lock_enabled is not None else settings.trading.profit_lock_enabled
         self.profit_lock_threshold = profit_lock_threshold or settings.trading.profit_lock_threshold
 
@@ -322,3 +349,70 @@ class TradingStrategy:
         if self._is_paused and datetime.utcnow() >= self._pause_until:
             self._is_paused = False
         return self._is_paused
+
+    def analyze_simple(self, market_state: MarketState) -> Optional[TradeOrder]:
+        """
+        Simplified analyze that returns TradeOrder directly.
+        Used by the bot main loop.
+
+        Args:
+            market_state: Market to analyze
+
+        Returns:
+            TradeOrder if trade criteria met, None otherwise
+        """
+        # Use simplified analyze (no balance/position tracking for now)
+        decision = self.analyze(
+            market_state=market_state,
+            current_balance=1000.0,  # Dummy balance
+            consecutive_losses=0,
+            has_open_position=False,
+        )
+
+        # Convert to order
+        return self.decision_to_order(decision)
+
+    def decision_to_order(self, decision: TradeDecision) -> Optional[TradeOrder]:
+        """
+        Convert TradeDecision to TradeOrder for execution.
+
+        Args:
+            decision: TradeDecision from analyze()
+
+        Returns:
+            TradeOrder or None if no trade should be made
+        """
+        if decision.signal not in [TradeSignal.BUY_UP, TradeSignal.BUY_DOWN]:
+            return None
+
+        if not decision.market_state or not decision.direction:
+            return None
+
+        # Apply safety limit: max $5 per trade
+        size = min(decision.suggested_size_usd or 0, settings.max_position_size)
+
+        # Determine side
+        side = MarketSide.UP if decision.direction == "up" else MarketSide.DOWN
+
+        # Calculate expected edge
+        # Edge = (probability * payout) - cost
+        # For binary markets: payout = 1.0, cost = entry_price
+        probability = (
+            decision.market_state.up_probability
+            if side == MarketSide.UP
+            else decision.market_state.down_probability
+        )
+        expected_edge = (probability * 1.0) - decision.entry_price
+
+        return TradeOrder(
+            market_id=decision.market_state.market_id,
+            token_id_up=decision.market_state.token_id_up,
+            token_id_down=decision.market_state.token_id_down,
+            side=side,
+            price=decision.entry_price,
+            size=size,
+            expected_edge=expected_edge,
+            market_end_time=decision.market_state.market_end_time,
+            confidence=decision.confidence,
+            reason=decision.reason,
+        )

@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from src.config import settings
-from src.core.strategy import TradeSignal, MarketSide
+from src.core.strategy import TradeOrder, MarketSide
 
 logger = logging.getLogger(__name__)
 
@@ -45,19 +45,19 @@ class OrderExecutor:
         self.winning_trades = 0
         self.total_pnl = 0.0
 
-    async def execute_signal(self, signal: TradeSignal) -> Optional[str]:
+    async def execute_signal(self, signal: TradeOrder) -> Optional[str]:
         """
-        Execute a trade signal.
+        Execute a trade order.
 
         Args:
-            signal: TradeSignal from strategy
+            signal: TradeOrder from strategy
 
         Returns:
             Order ID if successful, None otherwise
         """
         try:
             logger.info(
-                f"🎯 Executing {signal.side.value.upper()} signal for {signal.market_id}: "
+                f"🎯 Executing {signal.side.value.upper()} order for {signal.market_id}: "
                 f"${signal.size:.2f} @ {signal.price:.3f} (edge: {signal.expected_edge:.1%})"
             )
 

@@ -12,8 +12,8 @@ class PolymarketConfig(BaseSettings):
     """Polymarket API configuratie."""
 
     # API Credentials
-    private_key: str = Field(..., env="POLYMARKET_PRIVATE_KEY")
-    funder_address: str = Field(..., env="POLYMARKET_FUNDER_ADDRESS")
+    api_key: Optional[str] = Field(default=None, env="POLYMARKET_API_KEY")
+    private_key: Optional[str] = Field(default=None, env="POLYMARKET_PRIVATE_KEY")
 
     # API Endpoints
     clob_host: str = "https://clob.polymarket.com"
@@ -21,21 +21,24 @@ class PolymarketConfig(BaseSettings):
 
     # Chain config
     chain_id: int = 137  # Polygon mainnet
-    signature_type: int = 1  # Email/Magic wallet
 
 
 class TradingConfig(BaseSettings):
     """Trading strategie configuratie."""
 
     # Entry criteria
-    min_confidence: float = Field(default=0.80, ge=0.50, le=0.99)
-    max_confidence: float = Field(default=0.95, ge=0.80, le=0.99)  # Above this, fees eat the margin
-    min_time_remaining_seconds: int = Field(default=60, ge=30)
-    max_time_remaining_seconds: int = Field(default=180, le=300)
-    min_spread_above_target_usd: float = Field(default=30.0, ge=10.0)
+    min_confidence: float = Field(default=0.80, ge=0.50, le=0.99, env="MIN_CONFIDENCE")
+    max_confidence: float = Field(default=0.95, ge=0.80, le=0.99, env="MAX_CONFIDENCE")
+    min_time_remaining_seconds: int = Field(default=60, ge=30, env="MIN_TIME_REMAINING")
+    max_time_remaining_seconds: int = Field(default=180, le=300, env="MAX_TIME_REMAINING")
+    min_expected_edge: float = Field(default=0.10, ge=0.05, env="MIN_EXPECTED_EDGE")
+
+    # Position sizing - SAFETY LIMITS
+    max_position_size: float = Field(default=5.0, ge=1.0, le=50.0, env="MAX_POSITION_SIZE")  # Max $5 per trade
+    max_open_positions: int = Field(default=3, ge=1, le=10, env="MAX_OPEN_POSITIONS")
+    max_total_exposure: float = Field(default=15.0, env="MAX_TOTAL_EXPOSURE")  # 3 positions * $5
 
     # Risk management
-    max_position_pct: float = Field(default=0.05, ge=0.01, le=0.20)
     max_consecutive_losses: int = Field(default=3)
     pause_after_losses_minutes: int = Field(default=30)
 
@@ -112,6 +115,39 @@ class Settings(BaseSettings):
 
     # Paper trading mode (geen echte trades)
     paper_trading: bool = Field(default=True, env="PAPER_TRADING")
+
+    # Bot settings
+    scan_interval_seconds: int = Field(default=10, ge=5, le=60, env="SCAN_INTERVAL_SECONDS")
+    target_asset: Optional[str] = Field(default=None, env="TARGET_ASSET")  # bitcoin, ethereum, solana, xrp
+
+    # Convenience accessors for nested configs
+    @property
+    def polymarket_api_key(self) -> Optional[str]:
+        return self.polymarket.api_key
+
+    @property
+    def polymarket_private_key(self) -> Optional[str]:
+        return self.polymarket.private_key
+
+    @property
+    def max_position_size(self) -> float:
+        return self.trading.max_position_size
+
+    @property
+    def max_open_positions(self) -> int:
+        return self.trading.max_open_positions
+
+    @property
+    def max_total_exposure(self) -> float:
+        return self.trading.max_total_exposure
+
+    @property
+    def min_confidence(self) -> float:
+        return self.trading.min_confidence
+
+    @property
+    def max_confidence(self) -> float:
+        return self.trading.max_confidence
 
     # Sub-configurations
     polymarket: PolymarketConfig = PolymarketConfig()
