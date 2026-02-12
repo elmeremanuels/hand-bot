@@ -88,6 +88,27 @@ class TestTradingStrategy:
         assert decision.signal == TradeSignal.HOLD
         assert "Confidence te laag" in decision.reason
 
+    def test_hold_signal_high_confidence(self):
+        """Test that hold signal is generated when confidence is too high (>95%)."""
+        strategy = TradingStrategy()
+        market = create_test_market(
+            up_prob=0.97,  # Above 95% threshold - fees eat margin
+            time_remaining=120,
+            btc_current=95100.0,
+            btc_target=94950.0
+        )
+
+        decision = strategy.analyze(
+            market_state=market,
+            current_balance=100.0,
+            consecutive_losses=0,
+            has_open_position=False
+        )
+
+        assert decision.signal == TradeSignal.HOLD
+        assert "te hoog" in decision.reason
+        assert "fees/spread" in decision.reason
+
     def test_hold_signal_insufficient_time(self):
         """Test that hold signal is generated when time is insufficient."""
         strategy = TradingStrategy()

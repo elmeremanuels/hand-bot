@@ -100,16 +100,19 @@ class TradingStrategy:
     Implementeert de trading strategie regels.
 
     Entry criteria:
-    1. Market confidence >= 80%
+    1. Market confidence 80-95% (sweet spot)
     2. Resterende tijd tussen 1-3 minuten
     3. Bitcoin prijs >= $30 boven/onder target
     4. Geen actief nieuws-pause
     5. Geen maximum consecutive losses bereikt
+
+    Note: Confidence >95% is avoided because fees/spread eat the profit margin.
     """
 
     def __init__(
         self,
         min_confidence: float = None,
+        max_confidence: float = None,
         min_time_remaining: int = None,
         max_time_remaining: int = None,
         min_spread: float = None,
@@ -118,6 +121,7 @@ class TradingStrategy:
     ):
         # Gebruik config defaults indien niet gespecificeerd
         self.min_confidence = min_confidence or settings.trading.min_confidence
+        self.max_confidence = max_confidence or settings.trading.max_confidence
         self.min_time_remaining = min_time_remaining or settings.trading.min_time_remaining_seconds
         self.max_time_remaining = max_time_remaining or settings.trading.max_time_remaining_seconds
         self.min_spread = min_spread or settings.trading.min_spread_above_target_usd
@@ -185,12 +189,22 @@ class TradingStrategy:
     ) -> TradeDecision:
         """Check of we een nieuwe positie moeten openen."""
 
-        # Regel 1: Minimum confidence
+        # Regel 1a: Minimum confidence
         if market_state.dominant_probability < self.min_confidence:
             return TradeDecision(
                 signal=TradeSignal.HOLD,
                 confidence=market_state.dominant_probability,
                 reason=f"Confidence te laag: {market_state.dominant_probability:.1%} < {self.min_confidence:.1%}",
+                market_state=market_state,
+            )
+
+        # Regel 1b: Maximum confidence (boven 95% eten fees de margin op)
+        if market_state.dominant_probability > self.max_confidence:
+            return TradeDecision(
+                signal=TradeSignal.HOLD,
+                confidence=market_state.dominant_probability,
+                reason=f"Confidence te hoog: {market_state.dominant_probability:.1%} > {self.max_confidence:.1%} "
+                       f"(fees/spread eten de margin op)",
                 market_state=market_state,
             )
 

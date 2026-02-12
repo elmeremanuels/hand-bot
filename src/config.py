@@ -29,6 +29,7 @@ class TradingConfig(BaseSettings):
 
     # Entry criteria
     min_confidence: float = Field(default=0.80, ge=0.50, le=0.99)
+    max_confidence: float = Field(default=0.95, ge=0.80, le=0.99)  # Above this, fees eat the margin
     min_time_remaining_seconds: int = Field(default=60, ge=30)
     max_time_remaining_seconds: int = Field(default=180, le=300)
     min_spread_above_target_usd: float = Field(default=30.0, ge=10.0)
