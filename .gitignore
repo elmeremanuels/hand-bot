@@ -68,9 +68,9 @@ dashboard-frontend/.next/
 dashboard-frontend/out/
 dashboard-frontend/.env.local
 
-# Polymarket data
-data/
-backtest_results/
+# Polymarket data (root level only, not src/data/)
+/data/
+/backtest_results/
 
 # Temporary files
 tmp/
